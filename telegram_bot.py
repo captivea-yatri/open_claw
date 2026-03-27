@@ -1,8 +1,8 @@
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from config import BOT_TOKEN
 
-BOT_TOKEN = "8487140265:AAFywY99oz-bWtRtDWY719LTOinkeTnNfY0"
 BASE_URL = "http://127.0.0.1:5000"
 
 
