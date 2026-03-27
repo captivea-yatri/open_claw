@@ -226,47 +226,73 @@ def create_lead():
 
 
 # Route to create a sale order
-@app.route("/create-sale-order", methods=["POST","GET"])
+@app.route("/create-sale-order", methods=["POST"])
 def create_sale_order():
     try:
+        # Log the incoming request details for debugging
         print("\n=== FLASK /create-sale-order REQUEST ===")
         print("Method:", request.method)
         print("Content-Type:", request.content_type)
         print("Raw body:", request.get_data(as_text=True))
 
+        # Check if the incoming request is in JSON format
         if not request.is_json:
             return jsonify({"ok": False, "error": "Request must be JSON"}), 400
 
+        # Parse the JSON body
         data = request.get_json()
         print("Parsed JSON:", data)
 
+        # Extract partner_id and lines from the request body
         partner_id = data.get("partner_id")
-        product_id = data.get("product_id")
-        qty = data.get("qty")
-        price = data.get("price")
+        lines = data.get("lines", [])
 
+        # Validate the presence of partner_id
         if partner_id is None:
             return jsonify({"ok": False, "error": "Missing field: partner_id"}), 400
-        if product_id is None:
-            return jsonify({"ok": False, "error": "Missing field: product_id"}), 400
-        if qty is None:
-            return jsonify({"ok": False, "error": "Missing field: qty"}), 400
-        if price is None:
-            return jsonify({"ok": False, "error": "Missing field: price"}), 400
 
-        uid = login()
+        # Validate the lines field
+        if not lines or not isinstance(lines, list):
+            return jsonify({"ok": False, "error": "Missing or invalid field: lines"}), 400
 
-        order_vals = {
-            "partner_id": int(partner_id),
-            "order_line": [
-                [0, 0, {
+        # Prepare the order lines for the sale order
+        order_lines = []
+        for line in lines:
+            product_id = line.get("product_id")
+            qty = line.get("qty")
+            price = line.get("price")
+
+            # Validate each order line for missing fields
+            if product_id is None:
+                return jsonify({"ok": False, "error": "Missing field: product_id in order line"}), 400
+            if qty is None:
+                return jsonify({"ok": False, "error": "Missing field: qty in order line"}), 400
+            if price is None:
+                return jsonify({"ok": False, "error": "Missing field: price in order line"}), 400
+
+            # Append the order line to the list
+            order_lines.append([
+                0, 0, {  # The [0, 0, {...}] format is required by Odoo
                     "product_id": int(product_id),
                     "product_uom_qty": float(qty),
                     "price_unit": float(price),
-                }]
-            ]
+                }
+            ])
+
+        # Authenticate and get the user ID
+        uid = login()
+
+        # Prepare the final order values to be sent to Odoo
+        order_vals = {
+            "partner_id": int(partner_id),
+            "order_line": order_lines
         }
 
+        # Log the order values being sent to Odoo for debugging
+        print("Order values being sent to Odoo:")
+        print(json.dumps(order_vals, indent=2))
+
+        # Create the sale order in Odoo
         real_order_id = execute_kw(
             uid,
             "sale.order",
@@ -276,12 +302,14 @@ def create_sale_order():
             request_id=20,
         )
 
+        # Check if the order ID is valid (Odoo should return an integer)
         if not isinstance(real_order_id, int):
             return jsonify({
                 "ok": False,
                 "error": f"Unexpected sale.order create result from Odoo: {real_order_id}"
             }), 500
 
+        # Retrieve the created sale order data for confirmation
         order_data = execute_kw(
             uid,
             "sale.order",
@@ -291,12 +319,14 @@ def create_sale_order():
             request_id=21,
         )
 
+        # Ensure the sale order data was retrieved successfully
         if not order_data:
             return jsonify({
                 "ok": False,
                 "error": f"Odoo returned sale order ID {real_order_id} but record not found"
             }), 500
 
+        # Return the response with the sale order details
         return jsonify({
             "ok": True,
             "sale_order_id": real_order_id,
@@ -305,6 +335,7 @@ def create_sale_order():
         }), 201
 
     except Exception as e:
+        # Handle exceptions and return error response
         return jsonify({"ok": False, "error": str(e)}), 500
 
 

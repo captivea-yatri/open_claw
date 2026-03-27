@@ -1,0 +1,5 @@
+ODOO_URL = "odoo_url"
+ODOO_DB = "database_name"
+ODOO_USERNAME = "user_login"
+ODOO_API_KEY = "user password or api key"
+BOT_TOKEN = "Token"

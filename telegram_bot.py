@@ -154,32 +154,62 @@ async def create_lead(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # /create_sale_order command - creates a new sale order in Odoo via the Flask API
 async def create_sale_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # Get the full text of the message and extract the command arguments
         full_text = update.message.text or ""
         prefix = "/create_sale_order"
         raw = full_text[len(prefix):].strip()
 
+        # Validate the input format
         if not raw:
             await update.message.reply_text(
-                "Usage:\n/create_sale_order PartnerID | ProductID | Qty | Price"
+                "Usage:\n/create_sale_order PartnerID | ProductID,Qty,Price ; ProductID,Qty,Price"
             )
             return
 
-        parts = [p.strip() for p in raw.split("|")]
-        if len(parts) < 4:
+        # Split the input into partner_id and product lines
+        main_parts = [p.strip() for p in raw.split("|", 1)]
+        if len(main_parts) < 2:
             await update.message.reply_text(
-                "Usage:\n/create_sale_order PartnerID | ProductID | Qty | Price"
+                "Usage:\n/create_sale_order PartnerID | ProductID,Qty,Price ; ProductID,Qty,Price"
             )
             return
 
+        # Extract the partner_id and the product lines
+        partner_id = int(main_parts[0])
+        line_text = main_parts[1]
+
+        # Split the product lines by ';' and validate each line
+        raw_lines = [x.strip() for x in line_text.split(";") if x.strip()]
+        if not raw_lines:
+            await update.message.reply_text("At least one product line is required.")
+            return
+
+        # Prepare the list of product lines
+        lines = []
+        for item in raw_lines:
+            parts = [p.strip() for p in item.split(",")]
+            if len(parts) != 3:
+                await update.message.reply_text(
+                    f"Invalid line format: {item}\nUse ProductID,Qty,Price"
+                )
+                return
+
+            lines.append({
+                "product_id": int(parts[0]),
+                "qty": float(parts[1]),
+                "price": float(parts[2]),
+            })
+
+        # Prepare the payload to send to the Flask API
         payload = {
-            "partner_id": int(parts[0]),
-            "product_id": int(parts[1]),
-            "qty": float(parts[2]),
-            "price": float(parts[3]),
+            "partner_id": partner_id,
+            "lines": lines
         }
 
+        # Print payload for debugging
         print("Telegram -> /create-sale-order payload:", payload)
 
+        # Send the request to the Flask API to create the sale order
         response = requests.post(
             f"{BASE_URL}/create-sale-order",
             json=payload,
@@ -187,9 +217,11 @@ async def create_sale_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         data = response.json()
 
+        # Print response for debugging
         print("Telegram <- /create-sale-order status:", response.status_code)
         print("Telegram <- /create-sale-order response:", data)
 
+        # Handle the response from the Flask API
         if response.ok and data.get("ok") is True:
             order = data.get("sale_order", {})
             await update.message.reply_text(
@@ -203,6 +235,7 @@ async def create_sale_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"Sale order creation failed: {data.get('error')}"
             )
+
     except Exception as e:
         await update.message.reply_text(f"Error: {str(e)}")
 
