@@ -6,7 +6,6 @@ from config import ODOO_URL, ODOO_DB, ODOO_USERNAME, ODOO_API_KEY
 app = Flask(__name__)
 HEADERS = {"Content-Type": "application/json"}
 
-
 # Function to send requests to Odoo
 def odoo_post(payload):
     print("\n=== ODOO REQUEST ===")
@@ -46,7 +45,6 @@ def odoo_post(payload):
 
     return result["result"]
 
-
 # Login function to authenticate and retrieve UID
 def login():
     payload = {
@@ -64,7 +62,6 @@ def login():
     if not uid:
         raise Exception("No UID returned from Odoo login")
     return uid
-
 
 # Function to execute methods on Odoo models
 def execute_kw(uid, model, method, args=None, kwargs=None, request_id=2):
@@ -89,11 +86,10 @@ def execute_kw(uid, model, method, args=None, kwargs=None, request_id=2):
                 kwargs,
             ],
         },
-        "id": request_id,  # request correlation id only, NOT database record id
+        "id": request_id,
     }
 
     return odoo_post(payload)
-
 
 # Route to test Odoo connection
 @app.route("/test", methods=["GET"])
@@ -103,7 +99,6 @@ def test_connection():
         return jsonify({"ok": True, "message": "Connected successfully", "uid": uid})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
 
 # Route to fetch customers
 @app.route("/customers", methods=["GET"])
@@ -121,7 +116,6 @@ def customers():
         return jsonify({"ok": True, "customers": result or []})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
 
 # Route to fetch debug info
 @app.route("/debug-info", methods=["GET"])
@@ -148,9 +142,52 @@ def debug_info():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+# Search customer by name
+@app.route("/find-customer", methods=["GET"])
+def find_customer():
+    try:
+        query = (request.args.get("q") or "").strip()
+        if not query:
+            return jsonify({"ok": False, "error": "Missing query"}), 400
+
+        uid = login()
+        result = execute_kw(
+            uid,
+            "res.partner",
+            "search_read",
+            args=[[["name", "ilike", query]]],
+            kwargs={"fields": ["id", "name", "phone", "email"], "limit": 5},
+            request_id=50,
+        )
+
+        return jsonify({"ok": True, "customers": result or []})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# Search product by name
+@app.route("/find-product", methods=["GET"])
+def find_product():
+    try:
+        query = (request.args.get("q") or "").strip()
+        if not query:
+            return jsonify({"ok": False, "error": "Missing query"}), 400
+
+        uid = login()
+        result = execute_kw(
+            uid,
+            "product.product",
+            "search_read",
+            args=[[["name", "ilike", query]]],
+            kwargs={"fields": ["id", "name", "lst_price"], "limit": 5},
+            request_id=51,
+        )
+
+        return jsonify({"ok": True, "products": result or []})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # Route to create a new lead
-@app.route("/create-lead", methods=["POST","GET"])
+@app.route("/create-lead", methods=["POST"])
 def create_lead():
     try:
         print("\n=== FLASK /create-lead REQUEST ===")
@@ -198,7 +235,6 @@ def create_lead():
                 "error": f"Unexpected create result from Odoo: {real_lead_id}"
             }), 500
 
-        # Use read, not search_read, when you already know the exact ID
         lead_data = execute_kw(
             uid,
             "crm.lead",
@@ -224,45 +260,36 @@ def create_lead():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-
 # Route to create a sale order
 @app.route("/create-sale-order", methods=["POST"])
 def create_sale_order():
     try:
-        # Log the incoming request details for debugging
         print("\n=== FLASK /create-sale-order REQUEST ===")
         print("Method:", request.method)
         print("Content-Type:", request.content_type)
         print("Raw body:", request.get_data(as_text=True))
 
-        # Check if the incoming request is in JSON format
         if not request.is_json:
             return jsonify({"ok": False, "error": "Request must be JSON"}), 400
 
-        # Parse the JSON body
         data = request.get_json()
         print("Parsed JSON:", data)
 
-        # Extract partner_id and lines from the request body
         partner_id = data.get("partner_id")
         lines = data.get("lines", [])
 
-        # Validate the presence of partner_id
         if partner_id is None:
             return jsonify({"ok": False, "error": "Missing field: partner_id"}), 400
 
-        # Validate the lines field
         if not lines or not isinstance(lines, list):
             return jsonify({"ok": False, "error": "Missing or invalid field: lines"}), 400
 
-        # Prepare the order lines for the sale order
         order_lines = []
         for line in lines:
             product_id = line.get("product_id")
             qty = line.get("qty")
             price = line.get("price")
 
-            # Validate each order line for missing fields
             if product_id is None:
                 return jsonify({"ok": False, "error": "Missing field: product_id in order line"}), 400
             if qty is None:
@@ -270,29 +297,24 @@ def create_sale_order():
             if price is None:
                 return jsonify({"ok": False, "error": "Missing field: price in order line"}), 400
 
-            # Append the order line to the list
             order_lines.append([
-                0, 0, {  # The [0, 0, {...}] format is required by Odoo
+                0, 0, {
                     "product_id": int(product_id),
                     "product_uom_qty": float(qty),
                     "price_unit": float(price),
                 }
             ])
 
-        # Authenticate and get the user ID
         uid = login()
 
-        # Prepare the final order values to be sent to Odoo
         order_vals = {
             "partner_id": int(partner_id),
             "order_line": order_lines
         }
 
-        # Log the order values being sent to Odoo for debugging
         print("Order values being sent to Odoo:")
         print(json.dumps(order_vals, indent=2))
 
-        # Create the sale order in Odoo
         real_order_id = execute_kw(
             uid,
             "sale.order",
@@ -302,14 +324,12 @@ def create_sale_order():
             request_id=20,
         )
 
-        # Check if the order ID is valid (Odoo should return an integer)
         if not isinstance(real_order_id, int):
             return jsonify({
                 "ok": False,
                 "error": f"Unexpected sale.order create result from Odoo: {real_order_id}"
             }), 500
 
-        # Retrieve the created sale order data for confirmation
         order_data = execute_kw(
             uid,
             "sale.order",
@@ -319,14 +339,12 @@ def create_sale_order():
             request_id=21,
         )
 
-        # Ensure the sale order data was retrieved successfully
         if not order_data:
             return jsonify({
                 "ok": False,
                 "error": f"Odoo returned sale order ID {real_order_id} but record not found"
             }), 500
 
-        # Return the response with the sale order details
         return jsonify({
             "ok": True,
             "sale_order_id": real_order_id,
@@ -335,10 +353,7 @@ def create_sale_order():
         }), 201
 
     except Exception as e:
-        # Handle exceptions and return error response
         return jsonify({"ok": False, "error": str(e)}), 500
 
-
-# Run the Flask app
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
